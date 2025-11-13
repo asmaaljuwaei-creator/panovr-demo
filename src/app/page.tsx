@@ -5,7 +5,6 @@ import BaseMapOriginal, { BasePoint } from "@/components/BaseMap";
 const BaseMap = BaseMapOriginal as unknown as any;
 import PanoramaVR from "@/components/PanoramaVR";
 import graph from "@/data/graph.json";
-import WebXRViewer from "@/components/WebXRViewer";
 
 type Graph = {
   startId: string;
@@ -418,15 +417,7 @@ export default function Page() {
             zIndex: 2000,
           }}
         >
-          <WebXRViewer
-            // You can provide src directly, or pass imagePath + resolveImagePath
-            imagePath={panoForVR.src} // imagePath={/* panoForVR.markerId or link.imagePath if you prefer */}
-            resolveImagePath={resolveImagePath}
-            onClose={() => setShowXR(false)}
-            startYawDeg={0}
-            onNext={() => loadNextPanorama()}
-            onPrev={() => loadPreviousPanorama()}
-          />
+         
         </div>
       )}
     </div>
