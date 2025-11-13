@@ -1,0 +1,17 @@
+{
+  "startId": "p1",
+  "nodes": {
+    "p1": {
+      "imageUrl": "/panos/pano1.jpg",
+      "links": [
+        {"targetId":"p2","yaw":45,"latitude":0,"longitude":0,"imagePath":"/panos/pano2.jpg"}
+      ]
+    },
+    "p2": {
+      "imageUrl": "/panos/pano2.jpg",
+      "links": [
+        {"targetId":"p1","yaw":225,"latitude":0,"longitude":0,"imagePath":"/panos/pano1.jpg"}
+      ]
+    }
+  }
+}
