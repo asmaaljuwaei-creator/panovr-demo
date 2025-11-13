@@ -20,7 +20,7 @@ import MultiLineString from "ol/geom/MultiLineString";
 
 function getAuth() {
   const baseURL = "https://api.neomaps.com";
-  const contractId = "721ae8ac-4d08-4caf-8722-694716000b68";
+  const contractId = "2cb5338f-a35d-444c-aac7-993dea00135e";
   const accessToken = "NjyAv9F2Fzw7IO19IrKL1w7bWy0Hg3J-KZUOpvdiF6g";
 
   //if (!baseURL) throw new Error("🗺️ NEXT_PUBLIC_BASE_URL is not defined");
