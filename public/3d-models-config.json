@@ -1,0 +1,209 @@
+{
+  "models": [
+    {
+      "id": "kafd",
+      "name": "KAFD Building",
+      "path": "3DTiles/Buildings/KAFD.glb",
+      "coordinates": {
+        "lat": 24.7635309,
+        "lon": 46.6398267
+      },
+      "position": {
+        "offsetX": 50,
+        "offsetY": -7,
+        "offsetZ": -180
+      },
+      "rotation": {
+        "y": 295
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.75,
+        "roughness": 0.2,
+        "envMapIntensity": 1,
+        "clearcoat": 0.2,
+        "clearcoatRoughness": 0.2,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.5
+        }
+      }
+    },
+    {
+      "id": "kingdom-tower",
+      "name": "Kingdom Tower",
+      "path": "3DTiles/Buildings/Kingdom_Tower.glb",
+      "coordinates": {
+        "lat": 24.7114173,
+        "lon": 46.6743962
+      },
+      "position": {
+        "offsetX": -5,
+        "offsetY": 0,
+        "offsetZ": 0
+      },
+      "rotation": {
+        "y": 0
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.75,
+        "roughness": 0.05,
+        "envMapIntensity": 1,
+        "clearcoat": 0.2,
+        "clearcoatRoughness": 0.02,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.5
+        }
+      }
+    },
+    {
+      "id": "faisaliah",
+      "name": "Faisaliah Tower",
+      "path": "3DTiles/Buildings/Faisaliah.glb",
+      "coordinates": {
+        "lat": 24.6903992,
+        "lon": 46.6850552
+      },
+      "position": {
+        "offsetX": 20,
+        "offsetY": 3,
+        "offsetZ": 25
+      },
+      "rotation": {
+        "y": 0
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.75,
+        "roughness": 0.2,
+        "envMapIntensity": 1,
+        "clearcoat": null,
+        "clearcoatRoughness": null,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.1
+        }
+      }
+    },
+    {
+      "id": "al-anoud",
+      "name": "Princess Al Anoud Tower",
+      "path": "3DTiles/Buildings/Al-Anoud.glb",
+      "coordinates": {
+        "lat": 24.7068721,
+        "lon": 46.6753775
+      },
+      "position": {
+        "offsetX": -10,
+        "offsetY": 0,
+        "offsetZ": 0
+      },
+      "rotation": {
+        "y": 0
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.75,
+        "roughness": 0.2,
+        "envMapIntensity": 1,
+        "clearcoat": 0.2,
+        "clearcoatRoughness": 0.02,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.5
+        }
+      }
+    },
+    {
+      "id": "dubai-wtc",
+      "name": "Dubai World Trade Center",
+      "path": "3DTiles/Buildings/DubaiWTC.glb",
+      "coordinates": {
+        "lat": 25.2271205,
+        "lon": 55.2895549
+      },
+      "position": {
+        "offsetX": -10,
+        "offsetY": 0,
+        "offsetZ": 0
+      },
+      "rotation": {
+        "y": 0
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.75,
+        "roughness": 0.2,
+        "envMapIntensity": 1,
+        "clearcoat": 0.2,
+        "clearcoatRoughness": 0.02,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.5
+        }
+      }
+    },
+    {
+      "id": "khalifa-tower",
+      "name": "Khalifa Tower",
+      "path": "3DTiles/Buildings/Khalifa_Tower.glb",
+      "coordinates": {
+        "lat": 25.1972132,
+        "lon": 55.2743405
+      },
+      "position": {
+        "offsetX": -10,
+        "offsetY": 0,
+        "offsetZ": 0
+      },
+      "rotation": {
+        "y": 0
+      },
+      "scale": {
+        "x": 1.11,
+        "y": 1.11,
+        "z": 1.11
+      },
+      "material": {
+        "metalness": 0.15,
+        "roughness": 0.5,
+        "envMapIntensity": 1,
+        "clearcoat": 0.2,
+        "clearcoatRoughness": 0.02,
+        "emissive": {
+          "color": "0xffffff",
+          "useMap": true,
+          "intensity": 0.5
+        }
+      }
+    }
+    
+  ]
+}

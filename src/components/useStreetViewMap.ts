@@ -21,7 +21,8 @@ import MultiLineString from "ol/geom/MultiLineString";
 function getAuth() {
   const baseURL = "https://api.neomaps.com";
   const contractId = "2cb5338f-a35d-444c-aac7-993dea00135e";
-  const accessToken = "NjyAv9F2Fzw7IO19IrKL1w7bWy0Hg3J-KZUOpvdiF6g";
+  const accessToken = "SBOX6CzXn48mAbGlj5HX_Ftntl_X7PljA4tEExIvgKI";
+
 
   //if (!baseURL) throw new Error("🗺️ NEXT_PUBLIC_BASE_URL is not defined");
   if (!contractId || !accessToken)

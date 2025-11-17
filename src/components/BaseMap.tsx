@@ -139,7 +139,22 @@ export default function BaseMap(props: {
   );
 
   // Minimal “navigate by link target id” (from PanoramaVR)
-  const handleNavigate = (targetId: string) => {
+  const handleNavigate = (
+    targetId: string,
+    meta?: { lat?: number; lon?: number; imagePath?: string }
+  ) => {
+    // If we have imagePath, try that first (more reliable for sequence navigation)
+    if (meta?.imagePath) {
+      streetApi.selectMarkerByImagePath?.(meta.imagePath, {
+        center: true,
+        animateMs: 250,
+        keepZoom: true,
+        moveOnly: false,
+      });
+      return;
+    }
+    
+    // Fallback to ID-based navigation
     streetApi.selectMarkerById?.(targetId, {
       center: true,
       animateMs: 250,

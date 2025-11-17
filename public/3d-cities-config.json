@@ -1,0 +1,37 @@
+{
+  "cities": [
+    {
+      "id": "riyadh",
+      "name": "Riyadh",
+      "tilesetPath": "3DTiles/3DTiles/",
+      "anchorLatLon": {
+        "lat": 24.65100980316966,
+        "lon": 46.77485429551907
+      },
+      "loadDistance": 500000,
+      "enabled": true
+    },
+    {
+      "id": "dubai",
+      "name": "Dubai",
+      "tilesetPath": "3DTiles/Dubai3DTiles/",
+      "anchorLatLon": {
+        "lat": 25.218816,
+        "lon": 55.2729853
+      },
+      "loadDistance": 500000,
+      "enabled": true
+    },
+    {
+      "id": "makkah",
+      "name": "Makkah",
+      "tilesetPath": "3DTiles/MakkahTiles/",
+      "anchorLatLon": {
+        "lat": 21.464182,
+        "lon": 39.876372
+      },
+      "loadDistance": 500000,
+      "enabled": true
+    }
+  ]
+}

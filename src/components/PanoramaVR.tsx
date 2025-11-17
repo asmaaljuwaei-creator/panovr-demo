@@ -42,10 +42,10 @@ interface PanoItem {
   sequence?: string;
 }
 
-const SEQ_KEY = "neo:panos:sequence:v1";
-const SEQ_IDX_KEY = "neo:panos:index:v1";
+//const SEQ_KEY = "neo:panos:sequence:v1";
+//const SEQ_IDX_KEY = "neo:panos:index:v1";
 
-function loadPanoSequence(): { list: PanoItem[]; idx: Record<string, number> } {
+/*function loadPanoSequence(): { list: PanoItem[]; idx: Record<string, number> } {
   try {
     const raw = localStorage.getItem(SEQ_KEY);
     const rawIdx = localStorage.getItem(SEQ_IDX_KEY);
@@ -55,40 +55,52 @@ function loadPanoSequence(): { list: PanoItem[]; idx: Record<string, number> } {
   } catch {
     return { list: [], idx: {} };
   }
-}
+}*/
 
 // --- helper: read A/B across varying mappings ---
 function readABFromRightGp(gp: Gamepad) {
   const btns = gp.buttons || [];
-  // Try common Oculus mappings in order of likelihood
+
+  // Debug: log button presses (disabled to prevent payload overflow)
+  // Uncomment only when debugging button mapping issues
+
+  // Quest/WebXR right controller button mapping:
+  // Index 4 = A button (lower button)
+  // Index 5 = B button (upper button)
+  // Index 3 = X button (on left controller, sometimes detected)
   const candidates: [number, number][] = [
-    [0, 1], // many Quest builds: A,B
-    [4, 5], // some builds / polyfills: A,B
+    [4, 5], // Quest / WebXR right controller: A (index 4), B (index 5)
+    [3, 4], // Some variants or left controller
+    [0, 1], // trigger, grip as emergency fallback
     [1, 2], // occasional variant
   ];
 
   for (const [ai, bi] of candidates) {
+    const hasA = !!btns[ai];
+    const hasB = !!btns[bi];
+    if (!hasA && !hasB) continue;
+
     const a = !!(btns[ai] && btns[ai].pressed);
     const b = !!(btns[bi] && btns[bi].pressed);
-    // If either is present on this candidate, trust this pair
-    if (btns[ai] || btns[bi]) return { a, b };
+    return { a, b };
   }
 
-  // Fallback: treat any two smallest indices (excluding trigger/grip) as A/B
-  // Skip index 0/1 if they look like trigger/grip with heavy analog value
+  // Fallback: if we really don't know, treat the first two
+  // pressed buttons as A/B (debuggy but better than nothing).
   const actives = btns
-    .map((b, i) => ({ i, v: (typeof b.value === "number" ? b.value : (b.pressed ? 1 : 0)) }))
-    .filter(x => x.v !== undefined && x.i <= 7); // keep first few buttons only
-  // Prefer digital-ish presses
-  const pressed = actives.filter(x => (gp.buttons[x.i]?.pressed));
+    .map((b, i) => ({
+      i,
+      v: typeof b.value === "number" ? b.value : b.pressed ? 1 : 0,
+    }))
+    .filter((x) => x.v !== undefined && x.i <= 7);
+
+  const pressed = actives.filter((x) => gp.buttons[x.i]?.pressed);
   if (pressed.length >= 2) {
-    const [aIdx, bIdx] = pressed.slice(0, 2).map(x => x.i);
-    return { a: true, b: true, aIdx, bIdx };
+    return { a: true, b: true };
   }
-  // Otherwise just report none
+
   return { a: false, b: false };
 }
-
 
 export type CubeImages =
   | { type: "cube"; images: [string, string, string, string, string, string] }
@@ -198,7 +210,7 @@ const PAD_STEP_DEG = 18;
 
 const INFOSPOT_RADIUS = 1000;
 const FLOOR_Y = -INFOSPOT_RADIUS * 0.35;
-const ENABLE_LASERS = false; // Set to true to enable lasers (may cause lag with many hotspots)
+const ENABLE_LASERS = true; // Set to true to enable lasers (may cause lag with many hotspots)
 const LASER_UPDATE_INTERVAL_MS = 100; // Update lasers every 100ms instead of every frame
 /* ===================== Image helpers ===================== */
 async function loadImageMeta(url: string) {
@@ -255,7 +267,7 @@ function isBlob(x: unknown): x is Blob {
 }
 const isHttp = (u: string) => /^https?:\/\//i.test(u);
 const looksRelative = (u: string) =>
-  typeof u === "string" && !isBlob(u) && !isHttp(u);
+  typeof u === "string" && !isBlob(u) && !isHttp(u) && !u.startsWith('blob:');
 
 async function adoptToLocalSrc(
   input: string | Blob | CubeImages,
@@ -553,7 +565,6 @@ async function pumpPrefetch() {
 }
 /** ----- XR controller tunables ----- */
 const XR_DEADZONE = 0.18;
-const XR_ZOOM_FOV_SPEED = 80;
 
 /** Yaw/pitch speeds when thumbstick held fully (deg/sec) */
 const XR_YAW_SPEED = 140; // horizontal look (left/right)
@@ -563,9 +574,6 @@ const XR_PITCH_SPEED = 100; // vertical look (up/down)
 const XR_SNAP_TURN_DEG = 30;
 const XR_SNAP_TURN_COOLDOWN_MS = 280;
 
-/** Thumbstick "forward/back" → navigate next/prev */
-const XR_NAV_THRESH = 0.55; // push up/down farther than this to navigate
-const XR_NAV_COOLDOWN_MS = 450;
 
 type XRStick = {
   x: number;
@@ -596,11 +604,12 @@ function dz(v: number, dead = XR_DEADZONE) {
 /** Rotate the visible panorama while in XR */
 function rotatePanorama(pano: any, dYawDeg: number, dPitchDeg: number) {
   if (!pano) return;
-  // yaw (around Y), pitch (around X). Clamp pitch a bit to avoid flipping.
+  // yaw (around Y), pitch (around X). Clamp pitch to prevent looking down at car logo.
   pano.rotation.y += THREE.MathUtils.degToRad(dYawDeg);
   const newPitch = pano.rotation.x + THREE.MathUtils.degToRad(dPitchDeg);
-  const CLAMP = THREE.MathUtils.degToRad(80); // up/down clamp
-  pano.rotation.x = THREE.MathUtils.clamp(newPitch, -CLAMP, +CLAMP);
+  const CLAMP_UP = THREE.MathUtils.degToRad(80); // can look up 80 degrees
+  const CLAMP_DOWN = THREE.MathUtils.degToRad(10); // can only look down 10 degrees (prevents seeing logo)
+  pano.rotation.x = THREE.MathUtils.clamp(newPitch, -CLAMP_UP, CLAMP_DOWN);
 }
 function disposeObject3D(root: THREE.Object3D) {
   root.traverse((obj: any) => {
@@ -647,6 +656,12 @@ export default function PanoramaVR({
   const viewerRef = useRef<any>(null);
   const panoRef = useRef<any>(null);
   const panolensAPIRef = useRef<any>(null);
+  
+  // Separate XR-only viewer
+  const xrSceneRef = useRef<THREE.Scene | null>(null);
+  const xrCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const xrRendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const xrPanoMeshRef = useRef<THREE.Mesh | null>(null);
 
   const compassRotRef = useRef<HTMLDivElement | null>(null);
   const targetFovRef = useRef<number>(75);
@@ -659,6 +674,7 @@ export default function PanoramaVR({
 
   const [uiScale, setUiScale] = useState(1);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [xrLoading, setXrLoading] = useState(false);
 
   const clickCooldownRef = useRef(0);
 
@@ -667,43 +683,26 @@ export default function PanoramaVR({
     currentLonLatProp ?? userLonLat ?? undefined;
   const currentLonLat: LL | undefined = rawLonLat as LL | undefined;
   const hasLonLat = !!(currentLonLat ?? userLonLat);
+  
+  // VR-independent state: track current panorama internally (initialized after currentLonLat)
+  const [vrCurrentId, setVrCurrentId] = useState<string | undefined>(currentId);
+  const [vrCurrentLonLat, setVrCurrentLonLat] = useState<[number, number] | undefined>(currentLonLat);
 
   const [yawDeg, setYawDeg] = useState(0);
   const yawDegStateRef = useRef(0);
 
   const xrBtnAWasDownRef = useRef(false);
   const xrBtnBWasDownRef = useRef(false);
+  const lastTimeRef = useRef<number | null>(null);
 
   // Super-simple image prefetch cache (warms browser cache)
-  const panoPrefetchCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
-const linksRef = useRef<Link[]>([]);
+  const linksRef = useRef<Link[]>([]);
+
+  useEffect(() => {
+    linksRef.current = links || [];
+  }, [links]);
 
 
-useEffect(() => {
-  linksRef.current = links || [];
-}, [links]);
-
-  async function prefetchLink(link?: {
-    targetId?: string;
-    imagePath?: string;
-  }) {
-    if (!link?.imagePath) return;
-    try {
-      // resolveImagePath can be undefined in your code sometimes
-      const url =
-        typeof resolveImagePath === "function"
-          ? await resolveImagePath(link.imagePath)
-          : link.imagePath;
-
-      if (!url || panoPrefetchCacheRef.current.has(url)) return;
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.decoding = "async";
-      img.src = url; // warms the HTTP cache
-      panoPrefetchCacheRef.current.set(url, img);
-    } catch {}
-  }
 
   function persistPanoLocation(id?: string) {
     try {
@@ -734,69 +733,536 @@ useEffect(() => {
   const [xrSupported, setXrSupported] = useState(false);
   const [xrActive, setXrActive] = useState(false);
   const xrSessionRef = useRef<XRSession | null>(null);
-
-
-  function resolveNextPrevNow(): { next?: Link; prev?: Link } {
-  const L = linksRef.current || [];
-  const here = currentLonLatLiveRef.current;
-  // 1) Prefer explicit rel
-  const byRel = pickNextPrevLinear(L);
-  if (byRel.next || byRel.prev) return byRel;
-
-  // 2) Fallback: stable picker by GPS/heading
-  const st = pickNextPrevStable(L, here, forwardHintRef.current, lastPickRef.current);
-  if (st.next || st.prev) return st;
-
-  // 3) Final fallback: sequence array (works even if links are empty)
-  const list = panoListRef.current;
-  const idx = currentIndexRef.current;
-  if (list?.length && idx >= 0) {
-    const len = list.length;
-    const nextItem = list[(idx + 1) % len];
-    const prevItem = list[(idx - 1 + len) % len];
-    const wrap = (it?: any): Link | undefined =>
-      it
-        ? { targetId: it.id, imagePath: it.imagePath, yaw: 0 } as unknown as Link
-        : undefined;
-    return { next: wrap(nextItem), prev: wrap(prevItem) };
-  }
-
-  return {};
-}
-
-  // --- [ADD A] krpano-like WebVR config + callbacks (mirrors <plugin ... on*> ---
-  const webvr_onavailable = () => {
-    // (Optional) you already show the Enter VR button via xrSupported + isFullscreenReal
-    // Add a toast if you want: e.g., setErrorMsg("VR available");
-  };
-  const webvr_onunknowndevice = () => {
-    // (Optional) fallback tuning for “fake/desktop” mode or cardboard profile
-  };
-  const webvr_onvrcontrollers = () => {
-    // (Optional) show controller lasers or diagnostics when controllers appear
-  };
-  const webvr_onentervr = () => {
-    // Hide non-VR layers, close settings panel, etc.
-    setSettingsOpen(false);
-    setNavButtonsVisible(false);
-  };
-  const webvr_onexitvr = () => {
-    // Restore non-VR layers if you hid anything in onentervr
-  };
-  const webvr_ondenied = () => {
-    setErrorMsg("Entering VR was denied.");
-    // You can auto clear after a moment if you like
-    setTimeout(() => setErrorMsg(null), 2500);
-  };
   useEffect(() => {
+    if (!xrActive || !ENABLE_LASERS) return;
+
+    // one shared raycaster for XR lasers
+    if (!xrRaycasterRef.current) {
+      xrRaycasterRef.current = new THREE.Raycaster();
+    }
+
+    let stopped = false;
+    let lastLaserUpdate = 0;
+
+    const loop = () => {
+      if (stopped) return;
+
+      const viewer = viewerRef.current;
+      const pano = panoRef.current;
+      const targetRoot =
+        vrHotspotGroupRef.current || hotspotGroupRef.current || pano || null;
+
+      if (!viewer || !targetRoot) {
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      const renderer: any = viewer.getRenderer?.() || (viewer as any).renderer;
+      const xr = renderer?.xr;
+      if (!xr || !xr.getController) {
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      const now = performance.now();
+      // Throttle laser raycasts to reduce cost
+      if (now - lastLaserUpdate >= LASER_UPDATE_INTERVAL_MS) {
+        const rc = xrRaycasterRef.current!;
+        const ctrl0 = xr.getController(0);
+        const ctrl1 = xr.getController(1);
+
+        if (ctrl0) {
+          // controller is part of the scene/pano
+          if (!ctrl0.parent && pano) {
+            pano.add(ctrl0); // or viewer.getScene()?.add(ctrl0);
+          }
+
+          if (!ctrl0.getObjectByName("laser")) {
+            ctrl0.add(makeLaserLine(10));
+          }
+          updateLaserToHit(ctrl0, rc, targetRoot);
+        }
+
+        if (ctrl1) {
+          //  controller is part of the scene/pano
+          if (!ctrl1.parent && pano) {
+            pano.add(ctrl1); // or viewer.getScene()?.add(ctrl1);
+          }
+
+          if (!ctrl1.getObjectByName("laser")) {
+            ctrl1.add(makeLaserLine(10));
+          }
+          updateLaserToHit(ctrl1, rc, targetRoot);
+        }
+
+        lastLaserUpdate = now;
+      }
+
+      requestAnimationFrame(loop);
+    };
+
+    requestAnimationFrame(loop);
+
+    return () => {
+      stopped = true;
+    };
+  }, [xrActive]);
+
+  useEffect(() => {
+    if (!xrActive) return;
+
+    let stopped = false;
+
+    const loop = () => {
+      if (stopped) return;
+
+      const viewer = viewerRef.current;
+      const pano = panoRef.current;
+      if (!viewer || !pano) {
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      // Get WebXR session
+      const renderer: any = viewer.getRenderer?.() || (viewer as any).renderer;
+      const session: XRSession | null =
+        renderer?.xr?.getSession?.() || xrSessionRef.current;
+
+      const pads: Gamepad[] = [];
+
+      // Prefer XR inputSources (Quest / WebXR)
+      if (session) {
+        try {
+          for (const src of session.inputSources || []) {
+            const gp = (src as any).gamepad as Gamepad | undefined;
+            if (gp) pads.push(gp);
+          }
+        } catch {}
+      }
+
+      // Fallback: navigator.getGamepads (desktop / emu)
+      if (!pads.length && navigator.getGamepads) {
+        const fromNav = navigator
+          .getGamepads()
+          .filter((g): g is Gamepad => !!g);
+        pads.push(...fromNav);
+      }
+
+      const now = performance.now();
+      const dt = 1 / 72; // rough frame time for continuous turn
+
+      for (const gp of pads) {
+        const { left, right } = xrGamepadSticks(gp);
+        const lx = dz(left.x);
+        const rx = dz(right.x);
+        const ry = dz(right.y);
+
+        // --- SNAP TURN on LEFT stick horizontal ---
+        if (
+          XR_SNAP_TURN_DEG > 0 &&
+          Math.abs(lx) > 0.75 &&
+          now >= xrSnapCooldownUntilRef.current
+        ) {
+          const dir = lx > 0 ? -1 : 1; // right / left
+          rotatePanorama(pano, dir * XR_SNAP_TURN_DEG, 0);
+          xrSnapCooldownUntilRef.current = now + XR_SNAP_TURN_COOLDOWN_MS;
+        }
+
+        // --- SMOOTH TURN on RIGHT stick (optional) ---
+        if (Math.abs(rx) > 0 || Math.abs(ry) > 0) {
+          rotatePanorama(
+            pano,
+            -rx * XR_YAW_SPEED * dt, // left/right look
+            -ry * XR_PITCH_SPEED * dt // up/down look
+          );
+        }
+      }
+
+      requestAnimationFrame(loop);
+    };
+
+    requestAnimationFrame(loop);
+
+    return () => {
+      stopped = true;
+    };
+  }, [xrActive]);
+
+  // Load texture into XR panorama mesh
+ const loadXRTexture = async (textureUrl: string) => {
+    if (!xrPanoMeshRef.current) return;
+    
+    console.log('loadXRTexture called with URL:', textureUrl);
+    console.log('URL type:', typeof textureUrl, 'starts with blob:', textureUrl?.startsWith?.('blob:'));
+    
+    const material = xrPanoMeshRef.current.material as THREE.MeshBasicMaterial;
+    const loader = new THREE.TextureLoader();
+    
+    return new Promise<void>((resolve, reject) => {
+      loader.load(
+        textureUrl,
+        (texture) => {
+          // Dispose old texture
+          if (material.map) {
+            material.map.dispose();
+          }
+          
+          // Configure texture for proper color and quality
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.generateMipmaps = false;
+          texture.wrapS = THREE.ClampToEdgeWrapping;
+          texture.wrapT = THREE.ClampToEdgeWrapping;
+          
+          // Update material for bright, unlit appearance
+          material.map = texture;
+          material.color.setHex(0xffffff);
+          material.toneMapped = false;
+          material.needsUpdate = true;
+          
+          console.log('✅ Texture loaded successfully');
+          resolve();
+        },
+        undefined, // No progress logging
+        (error) => {
+        //  console.error('❌ Failed to load XR texture from URL:', textureUrl);
+        //  console.error('Error details:', error);
+          reject(error);
+        }
+      );
+    });
+  };
+
+  // Initialize dedicated XR renderer and scene (separate from Panolens)
+  const initXRViewer = () => {
+    if (xrRendererRef.current) return; // already initialized
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Create XR-optimized renderer
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.xr.enabled = true;
+    
+    // Configure for proper color output
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping; // Disable tone mapping for full brightness
+    renderer.toneMappingExposure = 1.0;
+    
+    // Style and append canvas
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.zIndex = '2001';
+    renderer.domElement.style.display = 'none'; // hidden until XR starts
+    container.appendChild(renderer.domElement);
+    
+    xrRendererRef.current = renderer;
+
+    // Create scene
+    const scene = new THREE.Scene();
+    xrSceneRef.current = scene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+    camera.position.set(0, 0, 0); // Camera at origin, inside the sphere
+    xrCameraRef.current = camera;
+    
+    console.log('XR camera created at origin');
+
+    // Panorama sphere
+    const geometry = new THREE.SphereGeometry(500, 60, 40);
+    geometry.scale(-1, 1, 1); // invert for inside view
+    
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff, // Full white for proper texture brightness
+      side: THREE.DoubleSide, // Render both sides for safety
+      toneMapped: false, // Disable tone mapping for full brightness
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(0, 0, 0); // Ensure it's at origin
+    xrPanoMeshRef.current = mesh;
+    scene.add(mesh);
+    
+    console.log('XR panorama mesh created and added to scene');
+
+    // Note: MeshBasicMaterial doesn't use lights, so no lighting needed
+    // This keeps the panorama at full brightness
+
+    // Floor
+    const floorGeometry = new THREE.CircleGeometry(1000, 64);
+    floorGeometry.rotateX(-Math.PI / 2);
+    const floorMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.035,
+      depthWrite: false,
+    });
+    const floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+    floorMesh.position.y = FLOOR_Y;
+    scene.add(floorMesh);
+  };
+
+  // --- Enter/Exit WebXR immersive VR for the current panorama ---
+  const enterXR = async () => {
+    try {
+      const navAny: any = navigator as any;
+
+      if (!navAny.xr || !navAny.xr.requestSession) {
+        setErrorMsg("WebXR is not available in this browser.");
+              return;
+      }
+
+      // Make sure immersive-vr is actually supported
+      const supported = await navAny.xr.isSessionSupported?.("immersive-vr");
+      if (!supported) {
+        setErrorMsg("Immersive VR is not supported on this device/browser.");
+        return;
+      }
+
+      // Initialize XR viewer (separate from Panolens)
+      initXRViewer();
+      
+      const renderer = xrRendererRef.current;
+      const scene = xrSceneRef.current;
+      const camera = xrCameraRef.current;
+      const panoMesh = xrPanoMeshRef.current;
+      
+      if (!renderer || !scene || !camera || !panoMesh) {
+        setErrorMsg("XR viewer initialization failed.");
+        console.error('XR init failed:', { renderer: !!renderer, scene: !!scene, camera: !!camera, panoMesh: !!panoMesh });
+        return;
+      }
+
+      console.log('XR viewer initialized, loading texture...');
+      console.log('Current liveSrc:', liveSrc);
+      console.log('Scene children:', scene.children.length);
+      console.log('Panorama mesh:', panoMesh);
+
+      // Load current panorama texture into XR scene
+      if (liveSrc && typeof liveSrc === 'string') {
+        try {
+          await loadXRTexture(liveSrc);
+          console.log('Texture loaded, ready to start XR session');
+        } catch (error) {
+          console.error('Failed to load texture before XR:', error);
+          setErrorMsg("Failed to load panorama texture.");
+          return;
+        }
+      } else if (!liveSrc) {
+        setErrorMsg("No panorama loaded yet.");
+        console.error('No liveSrc available');
+        return;
+      }
+
+      // Show XR canvas, hide Panolens canvas
+      renderer.domElement.style.display = 'block';
+      const panolensCanvas = viewerRef.current?.getRenderer?.()?.domElement;
+      if (panolensCanvas) {
+        panolensCanvas.style.display = 'none';
+      }
+      
+      console.log('Canvas switched, XR canvas visible');
+
+      // Request an immersive VR session
+      const sessionInit: XRSessionInit = {
+        optionalFeatures: [
+          "local-floor",
+          "bounded-floor",
+          "hand-tracking",
+          "layers",
+        ],
+      };
+
+      const session: XRSession = await navAny.xr.requestSession(
+        "immersive-vr",
+        sessionInit
+      );
+
+      xrSessionRef.current = session;
+
+      // Hook the WebXR session into our dedicated XR renderer
+      renderer.xr.setSession(session);
+
+      lastTimeRef.current = null;
+
+      let frameCount = 0;
+      renderer.setAnimationLoop((time: number) => {
+        frameCount++;
+        if (frameCount === 1) {
+          console.log('🎬 XR animation loop started');
+        }
+        
+        const session: XRSession | null =
+          renderer.xr?.getSession?.() || xrSessionRef.current;
+
+        const pads: Gamepad[] = [];
+
+        // Prefer WebXR input sources (Quest etc.)
+        if (session) {
+          try {
+            for (const src of session.inputSources || []) {
+              const gp = (src as any).gamepad as Gamepad | undefined;
+              if (gp) pads.push(gp);
+            }
+          } catch {}
+        }
+
+        // Fallback: navigator.getGamepads for desktop / emulation
+        if (!pads.length && navigator.getGamepads) {
+          const fromNav = navigator.getGamepads();
+          for (const g of fromNav) if (g) pads.push(g);
+        }
+
+        // Compute dt
+        let dt = 1 / 72;
+        if (lastTimeRef.current != null) {
+          dt = Math.max(
+            0.001,
+            Math.min(0.05, (time - lastTimeRef.current) / 1000)
+          );
+        }
+        lastTimeRef.current = time;
+
+        // Use XR panorama mesh for rotation (not Panolens pano)
+        const xrPano = xrPanoMeshRef.current;
+        if (!xrPano) return;
+
+        const now = performance.now();
+
+        for (const gp of pads) {
+          // Debug: Log all button values once per second to identify trigger indices
+          if (frameCount % 72 === 0 && gp.buttons.length > 0) {
+            const pressed = gp.buttons
+              .map((b, i) => ({ i, v: b.value }))
+              .filter(x => x.v > 0.1);
+            if (pressed.length > 0) {
+              console.log('Active buttons:', pressed);
+            }
+          }
+          
+          const { left, right } = xrGamepadSticks(gp);
+          const lx = dz(left.x);
+          const rx = dz(right.x);
+          const ry = dz(right.y);
+
+          // --- SNAP TURN on LEFT stick horizontal ---
+          if (
+            XR_SNAP_TURN_DEG > 0 &&
+            Math.abs(lx) > 0.75 &&
+            now >= xrSnapCooldownUntilRef.current
+          ) {
+            const dir = lx > 0 ? -1 : 1; // right / left
+            rotatePanorama(xrPano, dir * XR_SNAP_TURN_DEG, 0);
+            xrSnapCooldownUntilRef.current = now + XR_SNAP_TURN_COOLDOWN_MS;
+          }
+
+          // --- SMOOTH TURN on RIGHT stick (yaw/pitch) ---
+          if (Math.abs(rx) > 0 || Math.abs(ry) > 0) {
+            rotatePanorama(
+              xrPano,
+              -rx * XR_YAW_SPEED * dt, // left/right look
+              -ry * XR_PITCH_SPEED * dt // up/down look
+            );
+          }
+
+          // --- A/B buttons → next/prev pano (hybrid: links first, sequence fallback) ---
+          const { a, b } = readABFromRightGp(gp);
+
+          // A → NEXT panorama
+          if (a && !xrBtnAWasDownRef.current) {
+            xrBtnAWasDownRef.current = true;
+            const next = nextLinkRef.current;
+            persistPanoLocation(currentId);
+            
+            if (next?.targetId) {
+              navigateOnceRef.current(next.targetId);
+            } else {
+              goNext();
+            }
+          } else if (!a) {
+            xrBtnAWasDownRef.current = false;
+          }
+
+          // B → PREVIOUS panorama
+          if (b && !xrBtnBWasDownRef.current) {
+            xrBtnBWasDownRef.current = true;
+            const prev = prevLinkRef.current;
+            persistPanoLocation(currentId);
+            
+            if (prev?.targetId) {
+              navigateOnceRef.current(prev.targetId);
+            } else {
+              goPrev();
+            }
+          } else if (!b) {
+            xrBtnBWasDownRef.current = false;
+          }
+        }
+
+        // Finally render this XR frame
+        renderer.render(scene, camera);
+      });
+
+      setXrActive(true);
+
+      // Clean up when the user exits VR from the headset/system UI
+      session.addEventListener("end", () => {
+        try {
+          renderer.xr.setSession(null);
+          renderer.setAnimationLoop(null);
+          
+          // Hide XR canvas, show Panolens canvas
+          renderer.domElement.style.display = 'none';
+          const panolensCanvas = viewerRef.current?.getRenderer?.()?.domElement;
+          if (panolensCanvas) {
+            panolensCanvas.style.display = 'block';
+          }
+        } catch {}
+        xrSessionRef.current = null;
+        setXrActive(false);
+           });
+    } catch (err) {
+      console.error("Failed to start XR:", err);
+      setErrorMsg("Failed to enter VR.");
+     }
+  };
+
+  const exitXR = async () => {
+    const session = xrSessionRef.current;
+    if (!session) return;
+    try {
+      await session.end();
+      // The 'end' event handler above will handle the rest (flags, renderer, etc.)
+    } catch (err) {
+      console.error("Error ending XR session:", err);
+    }
+  };
+
+
+  /*useEffect(() => {
     const { list, idx } = loadPanoSequence();
     panoListRef.current = list;
     idToIndexRef.current = idx;
-  }, []);
+    if (list.length === 0) {
+      console.warn('⚠️ No panorama sequence found in localStorage');
+    }
+  }, []);*/
   useEffect(() => {
     if (!currentId) return;
     const i = idToIndexRef.current[currentId];
-    if (typeof i === "number" && i >= 0) currentIndexRef.current = i;
+    if (typeof i === "number" && i >= 0) {
+      currentIndexRef.current = i;
+    }
   }, [currentId]);
 
   // Convert a stored imagePath into a URL (respect your resolveImagePath)
@@ -813,21 +1279,68 @@ useEffect(() => {
       localStorage.setItem("neo:lastPanoId", target.id);
     } catch {}
 
-    // Use your existing navigateOnceRef / onNavigate pipeline
-    // so the rest of the app updates currentId, src, links, etc.
-    // If you have a direct route: onNavigate(target.id, {...}), use that.
-    if (navigateOnceRef.current) {
-      navigateOnceRef.current(target.id);
-    } else if (typeof onNavigate === "function") {
-      onNavigate(target.id, {
-        lat: target.lat,
-        lon: target.lon,
-        imagePath: target.imagePath,
-      });
+    // Update mini-map if coordinates available
+    if (target.lat != null && target.lon != null) {
+      const llLatLon: [number, number] = [target.lon, target.lat];
+      try {
+        updateMiniMapPosition(llLatLon, true);
+      } catch {}
+    }
+
+    // If in XR mode, load the panorama directly without waiting for parent
+    if (xrActive && target.imagePath) {
+      console.log('goToIndex: target.imagePath =', target.imagePath);
+      console.log('goToIndex: resolveImagePath available?', typeof resolveImagePath === 'function');
+      console.log('goToIndex: looksRelative?', looksRelative(target.imagePath));
+      
+      try {
+        // Resolve the image path to a URL
+        let imageUrl = target.imagePath;
+        if (typeof resolveImagePath === 'function' && looksRelative(target.imagePath)) {
+          console.log('goToIndex: Resolving imagePath...');
+          imageUrl = await resolveImagePath(target.imagePath);
+          console.log('goToIndex: Resolved to:', imageUrl);
+        }
+        
+        // Load texture directly in XR
+        await loadXRTexture(imageUrl);
+        console.log('goToIndex: VR texture loaded successfully');
+        
+        // Update VR-internal state
+        setVrCurrentId(target.id);
+        if (target.lat != null && target.lon != null) {
+          const newLonLat: [number, number] = [target.lon, target.lat];
+          setVrCurrentLonLat(newLonLat);
+          currentLonLatLiveRef.current = newLonLat;
+        }
+      } catch (error) {
+        console.error('goToIndex: Failed to load VR texture:', error);
+      }
+    } else if (xrActive) {
+      console.warn('goToIndex: No imagePath for target', target.id);
+    }
+
+    // Also notify parent component (map) - but don't wait for it
+    if (typeof onNavigate === "function") {
+      try {
+        onNavigate(target.id, {
+          lat: target.lat,
+          lon: target.lon,
+          imagePath: target.imagePath,
+        });
+      } catch {
+        // Silent fail - VR continues independently
+      }
     }
   };
 
   const goNext = () => {
+    const list = panoListRef.current;
+    if (!list || list.length === 0) {
+      // Silent return - this is expected when using link-based navigation
+      return;
+    }
+    
     const i = currentIndexRef.current;
     if (i < 0) {
       // if unknown, recover by last stored id or nearest by GPS
@@ -839,7 +1352,6 @@ useEffect(() => {
       // fallback: pick the nearest to currentLonLat if available
       if (currentLonLatLiveRef.current) {
         const ll = currentLonLatLiveRef.current;
-        const list = panoListRef.current;
         let best = -1,
           bestR2 = Infinity;
         const k = Math.max(1e-9, Math.cos(((ll[1] || 0) * Math.PI) / 180));
@@ -857,10 +1369,17 @@ useEffect(() => {
         }
       }
     }
+    
     return goToIndex((currentIndexRef.current || 0) + 1);
   };
 
   const goPrev = () => {
+    const list = panoListRef.current;
+    if (!list || list.length === 0) {
+      // Silent return - this is expected when using link-based navigation
+      return;
+    }
+    
     const i = currentIndexRef.current;
     if (i < 0) {
       const last = localStorage.getItem("neo:lastPanoId");
@@ -870,7 +1389,6 @@ useEffect(() => {
       }
       if (currentLonLatLiveRef.current) {
         const ll = currentLonLatLiveRef.current;
-        const list = panoListRef.current;
         let best = -1,
           bestR2 = Infinity;
         const k = Math.max(1e-9, Math.cos(((ll[1] || 0) * Math.PI) / 180));
@@ -888,35 +1406,17 @@ useEffect(() => {
         }
       }
     }
+    
     return goToIndex((currentIndexRef.current || 0) - 1);
   };
 
   // This is your “one-line” config analogue to <plugin name="webvr" ... />
-  const webvr = {
-    mobilevr_support: true,
-    mobilevr_touch_support: true,
-    mobilevr_fake_support: true,
-    mobilevr_profile: {
-      normal: "90|60|42|0|0|0",
-      mobile: "80|60|42|35|0.441|0.156",
-    },
-    mobilevr_wakelock: true,
-    fullscreen_mirroring: false,
-    mouse_pointerlock: true,
-    onavailable: webvr_onavailable,
-    onunknowndevice: webvr_onunknowndevice,
-    onvrcontrollers: webvr_onvrcontrollers,
-    onentervr: webvr_onentervr,
-    onexitvr: webvr_onexitvr,
-    ondenied: webvr_ondenied,
-  };
 
   const gazeTimerRef = useRef<number | null>(null);
   const gazeDeadlineRef = useRef<number>(0);
   const reticleRef = useRef<HTMLDivElement | null>(null);
 
   // XR controller cooldowns
-  const xrNavCooldownUntilRef = useRef(0);
   const xrSnapCooldownUntilRef = useRef(0);
 
   // XR ray + hits
@@ -952,6 +1452,7 @@ useEffect(() => {
 
   const rafRunningRef = useRef(false);
   const startLoopRef = useRef<() => void>(() => {});
+
 
   // ===== 3D Arrow (front/back) =====
   const arrowGroupRef = useRef<THREE.Group | null>(null);
@@ -1502,117 +2003,7 @@ useEffect(() => {
     resolveIfNeeded,
   ]);
 
-  // === [FIX] Handle Quest controller buttons inside VR ===
-  useEffect(() => {
-    if (!xrActive) return;
-const checkControllers = async () => {
-  const renderer: any =
-    viewerRef.current?.getRenderer?.() || viewerRef.current?.renderer;
-  const session: XRSession | null =
-    renderer?.xr?.getSession?.() || xrSessionRef.current;
-
-  if (!session) {
-    requestAnimationFrame(checkControllers);
-    return;
-  }
-
-  // 1) Prefer XR inputSources (reliable in WebXR on Quest)
-  const padsFromXR: Gamepad[] = [];
-  try {
-    for (const src of session.inputSources || []) {
-      // Some sources (e.g., gaze) have no gamepad
-      const gp = (src as any).gamepad as Gamepad | undefined;
-      if (gp) padsFromXR.push(gp);
-    }
-  } catch {}
-
-  // 2) Fallback to navigator.getGamepads (desktop/Sim)
-  const padsFromNav = (navigator.getGamepads?.() || []).filter(Boolean) as Gamepad[];
-
-  const gamepads = padsFromXR.length ? padsFromXR : padsFromNav;
-
-  for (const gp of gamepads) {
-    if (!gp || !gp.buttons || gp.buttons.length < 2) continue;
-
-    // Read A/B with your robust helper (different browser mappings)
-    const { a: aDown, b: bDown } = readABFromRightGp(gp);
-
-    // === A → NEXT ===
-    if (aDown && !xrBtnAWasDownRef.current) {
-      xrBtnAWasDownRef.current = true;
-      const { next } = resolveNextPrevNow();   // recompute NOW (fresh links/GPS/sequence)
-      if (next?.targetId) {
-        if (xrActive && next.imagePath) {
-          const resolved = await resolveIfNeeded(next.imagePath);
-          await swapPanoramaInPlaceXR(resolved);     // in-place swap inside XR
-          const lastYaw = yawDegStateRef.current;
-          requestAnimationFrame(() => setCameraYawDeg(lastYaw));
-          // keep sequence index in sync if we used fallback
-          if (idToIndexRef.current[next.targetId] != null) {
-            currentIndexRef.current = idToIndexRef.current[next.targetId];
-          } else if (panoListRef.current?.length) {
-            const i = panoListRef.current.findIndex(p => p.imagePath === next.imagePath);
-            if (i >= 0) currentIndexRef.current = i;
-          }
-        } else {
-          // No imagePath yet → go through your normal navigation pipeline
-          persistPanoLocation(currentId);
-          navigateOnceRef.current(next.targetId);
-        }
-      }
-    } else if (!aDown) {
-      xrBtnAWasDownRef.current = false;
-    }
-
-    // === B → PREV ===
-    if (bDown && !xrBtnBWasDownRef.current) {
-      xrBtnBWasDownRef.current = true;
-      const { prev } = resolveNextPrevNow();
-      if (prev?.targetId) {
-        if (xrActive && prev.imagePath) {
-          const resolved = await resolveIfNeeded(prev.imagePath);
-          await swapPanoramaInPlaceXR(resolved);
-          const lastYaw = yawDegStateRef.current;
-          requestAnimationFrame(() => setCameraYawDeg(lastYaw));
-          if (idToIndexRef.current[prev.targetId] != null) {
-            currentIndexRef.current = idToIndexRef.current[prev.targetId];
-          } else if (panoListRef.current?.length) {
-            const i = panoListRef.current.findIndex(p => p.imagePath === prev.imagePath);
-            if (i >= 0) currentIndexRef.current = i;
-          }
-        } else {
-          persistPanoLocation(currentId);
-          navigateOnceRef.current(prev.targetId);
-        }
-      }
-    } else if (!bDown) {
-      xrBtnBWasDownRef.current = false;
-    }
-  }
-
-  requestAnimationFrame(checkControllers);
-};
-
-    requestAnimationFrame(checkControllers);
-    return () => {
-      xrBtnAWasDownRef.current = false;
-      xrBtnBWasDownRef.current = false;
-    };
-  }, [xrActive, currentId]);
-useEffect(() => {
-  if (!xrActive) return;
-  // If we don’t know the sequence index yet, try to set it now
-  if (currentIndexRef.current < 0 && currentId && idToIndexRef.current[currentId] != null) {
-    currentIndexRef.current = idToIndexRef.current[currentId];
-  }
-  // Prefetch whatever resolveNextPrevNow() picks
-  const { next, prev } = resolveNextPrevNow();
-  (async () => {
-    if (next?.imagePath) enqueuePrefetch(await resolveIfNeeded(next.imagePath));
-    if (prev?.imagePath) enqueuePrefetch(await resolveIfNeeded(prev.imagePath));
-  })();
-}, [xrActive, currentId]);
-  // === Gaze-based selection in VR/XR ===  
+  // === Gaze-based selection in VR/XR ===
 
   useEffect(() => {
     if (!xrActive) return;
@@ -1797,7 +2188,6 @@ useEffect(() => {
           const vr = await navAny.xr.isSessionSupported("immersive-vr");
           if (alive) {
             setXrSupported(!!vr);
-            if (vr) webvr.onavailable?.();
           }
         } else if (alive) setXrSupported(false);
       } catch {
@@ -1839,8 +2229,22 @@ useEffect(() => {
       miniArrowStyleRef.current = null;
       fromLonLatRef.current = null;
 
-      // xrCtlRef.current?.dispose();
-      //xrCtlRef.current = null;
+      // Cleanup XR viewer
+      if (xrRendererRef.current) {
+        try {
+          xrRendererRef.current.dispose();
+          xrRendererRef.current.domElement.remove();
+        } catch {}
+        xrRendererRef.current = null;
+      }
+      if (xrSceneRef.current) {
+        try {
+          disposeObject3D(xrSceneRef.current);
+        } catch {}
+        xrSceneRef.current = null;
+      }
+      xrCameraRef.current = null;
+      xrPanoMeshRef.current = null;
 
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -2694,6 +3098,56 @@ useEffect(() => {
     } catch {}
   }, [liveSrc]);
 
+  // Update XR panorama texture when liveSrc changes (XR mode only)
+  useEffect(() => {
+    if (!xrActive || !xrPanoMeshRef.current || !liveSrc) return;
+    
+    if (typeof liveSrc === 'string') {
+      loadXRTexture(liveSrc);
+    }
+  }, [liveSrc, xrActive]);
+
+  // Swap panorama when liveSrc changes (Panolens mode only)
+  useEffect(() => {
+    if (xrActive) return; // Skip if in XR mode - use dedicated XR viewer instead
+    
+    const viewer = viewerRef.current;
+    const currentPano = panoRef.current;
+    if (!viewer || !currentPano || !liveSrc) return;
+
+    // Skip if this is the initial load (panorama not yet added to viewer)
+    if (!viewer.panoramas || viewer.panoramas.length === 0) return;
+
+    (async () => {
+      try {
+        // Create new panorama
+        let newPano: any;
+        if (Array.isArray(liveSrc)) {
+          newPano = new (currentPano as any).constructor(liveSrc);
+        } else {
+          newPano = new (currentPano as any).constructor(liveSrc);
+        }
+
+        // Add and switch to new panorama
+        viewer.add(newPano);
+        viewer.setPanorama(newPano);
+
+        // Update ref
+        panoRef.current = newPano;
+
+        // Rebuild hotspots on new panorama
+        try {
+          buildHotspots(linksRef.current || []);
+        } catch {}
+
+        // Force render
+        viewer.render?.();
+      } catch (err) {
+        console.error("Failed to swap panorama:", err);
+      }
+    })();
+  }, [liveSrc, xrActive]);
+
   // UI scaling
   useEffect(() => {
     const el = rootRef.current;
@@ -2806,21 +3260,65 @@ useEffect(() => {
   }, [isFullscreenReal, isImmersive, hasLonLat]);
 
   /* ---------- navigation helpers ---------- */
-  function navigateOnce(targetId: string) {
+  async function navigateOnce(targetId: string) {
     if (lastYawRef.current != null) persistYaw(lastYawRef.current, currentId);
     const link = links.find((l) => l.targetId === targetId);
+    
     if (link) {
       if (link.longitude != null && link.latitude != null) {
         const llLatLon: [number, number] = [link.longitude!, link.latitude!]; // [lon,lat]
         updateMiniMapPosition(llLatLon, true);
       }
-      onNavigate(targetId, {
-        lon: link.longitude,
-        lat: link.latitude,
-        imagePath: link.imagePath,
-      });
+      
+      // If in XR mode, load the panorama directly
+      if (xrActive && link.imagePath) {
+        try {
+          // Resolve the image path to a URL
+          let imageUrl = link.imagePath;
+          const needsResolve = looksRelative(link.imagePath);
+          console.log('navigateOnce XR:', { 
+            imagePath: link.imagePath, 
+            needsResolve, 
+            hasResolver: typeof resolveImagePath === 'function' 
+          });
+          
+          if (typeof resolveImagePath === 'function' && needsResolve) {
+            imageUrl = await resolveImagePath(link.imagePath);
+            console.log('Resolved to:', imageUrl);
+          }
+          
+          // Load texture directly in XR
+          await loadXRTexture(imageUrl);
+          
+          // Update VR-internal state
+          setVrCurrentId(targetId);
+          if (link.longitude != null && link.latitude != null) {
+            const newLonLat: [number, number] = [link.longitude, link.latitude];
+            setVrCurrentLonLat(newLonLat);
+            currentLonLatLiveRef.current = newLonLat;
+          }
+        } catch {
+          // Silent fail - VR continues
+        }
+      }
+      
+      // Also notify parent (but don't depend on it)
+      try {
+        onNavigate(targetId, {
+          lon: link.longitude,
+          lat: link.latitude,
+          imagePath: link.imagePath,
+        });
+      } catch {
+        // Silent fail - VR continues independently
+      }
     } else {
-      onNavigate(targetId);
+      // No link metadata, just notify parent
+      try {
+        onNavigate(targetId);
+      } catch {
+        // Silent fail
+      }
     }
   }
   useEffect(() => {
@@ -2918,36 +3416,6 @@ useEffect(() => {
     g.rotation.set(0, yaw, 0);
     g.visible = true;
   }
-async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
-  const viewer = viewerRef.current;
-  const pano = panoRef.current;
-  if (!viewer || !pano) return;
-  const resolvedUrl = await preloadPanorama(nextImage);
-
-  // Prevent black flash by lowering resolution temporarily
- /*await withCheapDPR(viewer, async () => {
-    // Build a fresh Panolens ImagePanorama and switch to it without ending XR
-    const nextPano = new (pano as any).ImagePanorama(resolvedUrl);
-
-    // Transfer your VR-only hotspots container if you keep one
-    try {
-      if (vrHotspotGroupRef.current) nextPano.add(vrHotspotGroupRef.current);
-    } catch {}
-
-    // Add and activate
-    viewer.add(nextPano);
-    viewer.setPanorama(nextPano);
-
-    // Keep a ref so later code (hotspots, picks) attaches to the right node
-    panoRef.current = nextPano;
-
-    // Rebuild non-VR hotspots onto the new pano (so desktop mode keeps working)
-    try { buildHotspots(linksRef.current || []); } catch {}
-
-    // Force a render
-    viewer.render?.();
-  });*/
-}
 
   /* ---------- camera/zoom helpers ---------- */
   const setTargetFov = (f: number) => {
@@ -3102,20 +3570,6 @@ async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
       }
     };
   }, []);
-  /* function makeLaserLine(len = 10) {
-    const positions = new Float32Array([0, 0, 0, 0, 0, -len]);
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geom.setDrawRange(0, 2);
-    const mat = new THREE.LineBasicMaterial({
-      transparent: true,
-      opacity: 0.95,
-    });
-    const line = new THREE.Line(geom, mat);
-    (line as any).name = "laser";
-    line.frustumCulled = false;
-    return line;
-  }*/
 
   function setLaserLength(line: THREE.Line, dist: number) {
     const geom = line.geometry as THREE.BufferGeometry;
@@ -3163,389 +3617,18 @@ async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geom.setDrawRange(0, 2);
+
     const mat = new THREE.LineBasicMaterial({
+      color: 0xff0000, // bright red
       transparent: true,
       opacity: 0.95,
     });
+
     const line = new THREE.Line(geom, mat);
     (line as any).name = "laser";
     line.frustumCulled = false;
     return line;
   }
-  const enterXR = async () => {
-  
-
-    // 1) Grab core objects
-    const navXR: any = (navigator as any)?.xr;
-    const viewer:any = viewerRef.current ;
-    const renderer: THREE.WebGLRenderer | null =
-      (viewer &&
-        typeof viewer.getRenderer === "function" &&
-        viewer.getRenderer()) ||
-      (viewer && viewer.renderer) ||
-      null;
-    const scene: THREE.Scene | null =
-      (viewer && typeof viewer.getScene === "function" && viewer.getScene()) ||
-      (viewer && viewer.scene) ||
-      null;
-    const pano = panoRef.current;
-
-    if (!navXR || !renderer || !viewer || !scene || !pano || !liveSrc) {
-      console.warn("XR prerequisites missing — cannot enter XR.");
-      setErrorMsg("VR not supported or unavailable.");
-      return;
-    }
-
-    // 2) Switch Panolens to NORMAL mode (let WebXR drive rendering)
-    try {
-      const PAN = panolensAPIRef.current as any;
-      const NORMAL =
-        (PAN && PAN.Modes && (PAN.Modes.NORMAL ?? PAN.Modes.DEFAULT)) || 1;
-      if (viewer.disableEffect) viewer.disableEffect();
-      if (viewer.enableEffect) viewer.enableEffect(NORMAL);
-    } catch (err) {
-      console.warn("Panolens NORMAL mode set failed:", err);
-    }
-
-    try {
-      // 3) Start WebXR session
-      renderer.xr.enabled = true;
-      if ((renderer.xr as any).setReferenceSpaceType) {
-        (renderer.xr as any).setReferenceSpaceType("local-floor");
-      }
-
-      const session: XRSession = await navXR.requestSession("immersive-vr", {
-        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
-      });
-
-      if ((renderer.xr as any).setSession) {
-        await (renderer.xr as any).setSession(session);
-      }
-      // Keep a reference so we can dispose on exit
-
-      xrSessionRef.current = session;
-      setXrActive(true);
-      webvr?.onvrcontrollers?.();
-      webvr?.onentervr?.();
-
-      // Prefetch next/prev pano images in the background to make A/B instant
-      try {
-        await Promise.allSettled([
-          prefetchLink(nextLinkRef.current),
-          prefetchLink(prevLinkRef.current),
-        ]);
-      } catch {}
-
-      // 4) Set up controllers and lasers (only if enabled)
-      const ctrl0 = renderer.xr.getController(0) as THREE.Group;
-      const ctrl1 = renderer.xr.getController(1) as THREE.Group;
-      scene.add(ctrl0, ctrl1);
-
-      if (ENABLE_LASERS) {
-        const addLaser = (ctrl: THREE.Group) => {
-          const laser = makeLaserLine(10);
-          ctrl.add(laser);
-          (ctrl as any).laser = laser;
-        };
-        addLaser(ctrl0);
-        addLaser(ctrl1);
-      }
-
-      // Reset pano rotation
-      pano.rotation.set(0, 0, 0);
-
-      // 6) Stop non-XR RAF loop to avoid conflicts
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      rafRunningRef.current = false;
-
-      // 7) Controller SELECT (trigger) → raycast to VR hotspots
-      const onControllerSelect = (ev: any) => {
-        try {
-          const inputSource: XRInputSource = ev.inputSource;
-          const handed = (inputSource && inputSource.handedness) || "right";
-          const ctrlObj: THREE.Group = renderer.xr.getController(
-            handed === "left" ? 0 : 1
-          );
-          if (!ctrlObj) return;
-
-          const origin = new THREE.Vector3();
-          const direction = new THREE.Vector3(0, 0, -1);
-          ctrlObj.updateMatrixWorld(true);
-          origin.setFromMatrixPosition(ctrlObj.matrixWorld);
-          direction.applyMatrix4(ctrlObj.matrixWorld).sub(origin).normalize();
-
-          const raycaster = new THREE.Raycaster(origin, direction, 0.01, 500);
-          const group = vrHotspotGroupRef.current;
-          if (!group || group.children.length === 0) return;
-
-          const hits = raycaster.intersectObjects(group.children, true);
-          const hit = hits.find(
-            (h) => (h.object as any)?.userData?.type === "vr-link"
-          );
-          const targetId = (hit && (hit.object as any)?.userData?.targetId) as
-            | string
-            | undefined;
-          if (targetId) navigateOnce(targetId);
-        } catch (e) {
-          console.warn("select handler error:", e);
-        }
-      };
-
-      session.addEventListener("select", onControllerSelect);
-
-      // 8) XR animation loop
-      let lastLaserUpdate = 0;
-
-      renderer.setAnimationLoop(() => {
-        try {
-          const xrSession = renderer.xr.getSession && renderer.xr.getSession();
-          if (!xrSession) return;
-
-          // Update lasers only periodically (if enabled)
-          if (ENABLE_LASERS) {
-            const nowTs = performance.now();
-            if (nowTs - lastLaserUpdate > LASER_UPDATE_INTERVAL_MS) {
-              lastLaserUpdate = nowTs;
-              const rc = xrRaycasterRef.current || new THREE.Raycaster();
-              xrRaycasterRef.current = rc;
-              const target = vrHotspotGroupRef.current;
-              if (target && target.children.length > 0) {
-                updateLaserToHit(ctrl0, rc, target);
-                updateLaserToHit(ctrl1, rc, target);
-              }
-            }
-          }
-
-          // --- Gamepads ---
-          const sources = xrSession.inputSources || [];
-          let leftGp: Gamepad | undefined;
-          let rightGp: Gamepad | undefined;
-
-          for (const src of sources) {
-            const gp = (src as any).gamepad as Gamepad | undefined;
-            if (!gp) continue;
-            const hand = (src as any).handedness as XRHandedness | undefined;
-            if (hand === "left") leftGp = gp;
-            else if (hand === "right") rightGp = gp;
-          }
-
-          // Hide reticle if controllers are active
-          if (reticleRef.current) {
-            reticleRef.current.style.opacity = leftGp || rightGp ? "0" : "1";
-          }
-
-          // RIGHT STICK: look around
-          if (rightGp) {
-            const { right: rs } = xrGamepadSticks(rightGp);
-            const x = dz(rs.x);
-            const y = dz(rs.y);
-            if (x || y) {
-              const dYaw = -x * XR_YAW_SPEED * (1 / 60);
-              const dPitch = y * XR_PITCH_SPEED * (1 / 60);
-              rotatePanorama(pano, dYaw, dPitch);
-            }
-          }
-
-          // LEFT GRIP + LEFT STICK: ZOOM
-          let leftGripActive = false;
-          if (leftGp) {
-            const b = leftGp.buttons && leftGp.buttons[1];
-            let squeezeVal = 0;
-            if (b)
-              squeezeVal =
-                typeof b.value === "number" ? b.value : b.pressed ? 1 : 0;
-            leftGripActive = squeezeVal > 0.15;
-
-            const { left: ls } = xrGamepadSticks(leftGp);
-            if (leftGripActive) {
-              const zoomAxis = dz(-(ls.y || 0)); // up = zoom in
-              if (zoomAxis) {
-                const delta = -zoomAxis * (XR_ZOOM_FOV_SPEED * (1 / 60));
-                setTargetFov(targetFovRef.current + delta);
-              }
-            }
-          }
-
-          // LEFT STICK: snap turn + nav (only when NOT gripping)
-          if (leftGp && !leftGripActive) {
-            const { left: ls } = xrGamepadSticks(leftGp);
-            const nowTs = performance.now();
-
-            // Forward/back navigation on left stick
-            if (nowTs >= xrNavCooldownUntilRef.current) {
-              const up = dz(-(ls.y || 0));
-              if (up > XR_NAV_THRESH && nextLinkRef.current) {
-                xrNavCooldownUntilRef.current = nowTs + XR_NAV_COOLDOWN_MS;
-                persistPanoLocation(currentId);
-
-                navigateOnceRef.current(nextLinkRef.current.targetId);
-                // warm next/prev again after move
-                prefetchLink(nextLinkRef.current);
-                prefetchLink(prevLinkRef.current);
-              } else if (up < -XR_NAV_THRESH && prevLinkRef.current) {
-                xrNavCooldownUntilRef.current = nowTs + XR_NAV_COOLDOWN_MS;
-                persistPanoLocation(currentId);
-
-                navigateOnceRef.current(prevLinkRef.current.targetId);
-                prefetchLink(nextLinkRef.current);
-                prefetchLink(prevLinkRef.current);
-              }
-            }
-
-            // Snap turn left/right
-            const lx = dz(ls.x || 0);
-            if (XR_SNAP_TURN_DEG > 0) {
-              if (
-                Math.abs(lx) > 0.75 &&
-                nowTs >= xrSnapCooldownUntilRef.current
-              ) {
-                rotatePanorama(pano, (lx > 0 ? -1 : +1) * XR_SNAP_TURN_DEG, 0);
-                xrSnapCooldownUntilRef.current =
-                  nowTs + XR_SNAP_TURN_COOLDOWN_MS;
-              }
-            }
-          }
-
-          // RIGHT A/B: Next / Prev (edge-triggered)
-          if (rightGp) {
-            const btns = rightGp.buttons || [];
-            const aNow = !!(btns[4] && btns[4].pressed);
-            const bNow = !!(btns[5] && btns[5].pressed);
-
-            if (aNow && !xrBtnAWasDownRef.current && nextLinkRef.current) {
-              persistPanoLocation(currentId);
-
-              navigateOnceRef.current(nextLinkRef.current.targetId);
-              prefetchLink(nextLinkRef.current);
-              prefetchLink(prevLinkRef.current);
-            }
-            if (bNow && !xrBtnBWasDownRef.current && prevLinkRef.current) {
-              persistPanoLocation(currentId);
-
-              navigateOnceRef.current(prevLinkRef.current.targetId);
-              prefetchLink(nextLinkRef.current);
-              prefetchLink(prevLinkRef.current);
-            }
-
-            xrBtnAWasDownRef.current = aNow;
-            xrBtnBWasDownRef.current = bNow;
-          }
-
-          // Gaze ray for reticle/hover (only if needed)
-          const getCam =
-            viewer && viewer.getCamera
-              ? viewer.getCamera.bind(viewer)
-              : undefined;
-          const cam: THREE.Camera =
-            (getCam && getCam()) || (viewer && (viewer as any).camera);
-
-          if (cam && rayRef.current && rayArrowRef.current) {
-            cam.updateMatrixWorld(true);
-            const origin = cam.getWorldPosition(new THREE.Vector3());
-            const dir = new THREE.Vector3(0, 0, -1)
-              .applyQuaternion(cam.quaternion)
-              .normalize();
-            rayRef.current.origin.copy(origin);
-            rayRef.current.direction.copy(dir);
-            rayArrowRef.current.position.copy(origin);
-            rayArrowRef.current.setDirection(dir);
-
-            if (rayMarkerRef.current) {
-              const p = rayRef.current.at(
-                INFOSPOT_RADIUS * 0.9,
-                new THREE.Vector3()
-              );
-              rayMarkerRef.current.position.copy(p);
-              rayMarkerRef.current.visible = true;
-            }
-          }
-
-          // Hotspot hover highlight (limit to hotspot group)
-          const group = vrHotspotGroupRef.current;
-          const rc2 = xrRaycasterRef.current;
-          const ray = rayRef.current;
-          if (group && rc2 && ray && group.children.length > 0) {
-            rc2.set(ray.origin, ray.direction);
-            const hits = rc2.intersectObjects(group.children, true);
-            const h0 = hits[0] && (hits[0].object as any);
-
-            for (const child of group.children) {
-              const m = child as THREE.Mesh;
-              const isHit = m === h0 || m.parent === h0;
-              m.scale.setScalar(isHit ? 1.12 : 1.0);
-            }
-          }
-        } catch (err) {
-          console.warn("XR loop error:", err);
-        }
-        const camera = viewer.getCamera?.() || (viewer as any).camera;
-        renderer.render(scene, camera);
-      });
-
-      // 9) Session end cleanup
-      session.addEventListener("end", () => {
-        try {
-          session.removeEventListener("select", onControllerSelect);
-        } catch {}
-
-        try {
-          if (ENABLE_LASERS) {
-            const removeLaser = (ctrl: THREE.Group) => {
-              const laser = (ctrl as any).laser;
-              if (laser) {
-                ctrl.remove(laser);
-                disposeObject3D(laser);
-              }
-            };
-            removeLaser(ctrl0);
-            removeLaser(ctrl1);
-          }
-          scene.remove(ctrl0, ctrl1);
-        } catch {}
-
-        try {
-          if (vrHotspotGroupRef.current) {
-            pano.remove(vrHotspotGroupRef.current);
-            disposeObject3D(vrHotspotGroupRef.current);
-            vrHotspotGroupRef.current = null;
-          }
-        } catch {}
-
-        try {
-          if (rayArrowRef.current) {
-            scene.remove(rayArrowRef.current);
-            disposeObject3D(rayArrowRef.current);
-            rayArrowRef.current = null;
-          }
-          if (rayMarkerRef.current) {
-            scene.remove(rayMarkerRef.current);
-            disposeObject3D(rayMarkerRef.current);
-            rayMarkerRef.current = null;
-          }
-        } catch {}
-
-        setXrActive(false);
-        xrSessionRef.current = null;
-        renderer.xr.enabled = false;
-        renderer.setAnimationLoop(null);
-        startLoopRef.current?.(); // Restart non-XR loop
-        webvr?.onexitvr?.();
-      });
-    } catch (err) {
-      console.warn("enterXR failed:", err);
-      webvr?.ondenied?.();
-      setErrorMsg("Failed to enter VR.");
-    }
-  };
-
-  const exitXR = async () => {
-    try {
-      await xrSessionRef.current?.end();
-    } catch (err) {
-      console.warn("exitXR failed:", err);
-    }
-  };
 
   /* ---------- styles ---------- */
   const normalModeBottomNavStyle: React.CSSProperties = {
@@ -3659,10 +3742,10 @@ async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
           zIndex: 40,
         }}
       />
-      {xrSupported && !xrActive && isFullscreenReal && (
+      {xrSupported && !xrActive &&  (
         <button
           onClick={enterXR}
-          style={{ position: "absolute", top: 16, right: 16, zIndex: 41 }}
+          style={{ position: "absolute", top: 30, right: 16, zIndex: 41 }}
           title="Enter VR"
         >
           Enter VR
@@ -3671,7 +3754,7 @@ async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
       {xrActive && (
         <button
           onClick={exitXR}
-          style={{ position: "absolute", top: 16, right: 16, zIndex: 41 }}
+          style={{ position: "absolute", top: 30, right: 16, zIndex: 41 }}
           title="Exit VR"
         >
           Exit VR
@@ -3873,49 +3956,6 @@ async function swapPanoramaInPlaceXR(nextImage: string | Blob) {
         </div>
       )}
 
-      {/* HUD layer */}
-      {/*<div
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 999,
-          pointerEvents: "none",
-        }}
-      >
-        {nextLink && (
-          <ChevronHUD
-            kind="forward"
-            enabled={true}
-            uiScale={uiScale}
-            size={isFullscreenReal ? 120 : 72}
-            leanDeg={leanNext}
-            style={{
-              left: "50%",
-              bottom: isFullscreenReal ? "11%" : "8%",
-              transform: `translateX(-50%) scale(${uiScale})`,
-              pointerEvents: "auto",
-            }}
-            onClick={() => navigateOnce(nextLink.targetId)}
-          />
-        )}
-
-        {prevLink && (
-          <ChevronHUD
-            kind="back"
-            enabled={true}
-            uiScale={uiScale}
-            size={isFullscreenReal ? 120 : 72}
-            leanDeg={leanPrev}
-            style={{
-              left: "50%",
-              bottom: isFullscreenReal ? "3%" : "-7%",
-              transform: `translateX(-50%) scale(${uiScale})`,
-              pointerEvents: "auto",
-            }}
-            onClick={() => navigateOnce(prevLink.targetId)}
-          />
-        )}
-      </div>*/}
     </div>
   );
 }
@@ -3953,64 +3993,3 @@ function NavBtn(props: NavBtnProps) {
     </button>
   );
 }
-
-/*function ChevronHUD({
-  kind,
-  enabled,
-  uiScale = 1,
-  leanDeg = 0,
-  style,
-  onClick,
-  size = 120,
-}: ChevronHUDProps) {
-  const chevStyle = (_i: number): React.CSSProperties => ({
-    width: size,
-    height: size,
-    margin: 0,
-    opacity: enabled ? 1 : 0.6,
-    filter: "drop-shadow(0 8px 10px rgba(0,0,0,.35))",
-    transform: `perspective(900px) rotateX(58deg) rotate(${leanDeg}deg)`,
-    pointerEvents: "none",
-  });
-
-  const wrapper: React.CSSProperties = {
-    position: "absolute",
-    zIndex: 9999,
-    userSelect: "none",
-    touchAction: "manipulation",
-    cursor: enabled ? "pointer" : "default",
-    ...style,
-    transform: `${style?.transform ?? ""}${
-      kind === "back" ? " rotate(180deg)" : ""
-    }`,
-  };
-
-  const ChevSVG = ({ s }: { s: React.CSSProperties }) => (
-    <svg viewBox="0 0 100 100" style={s} aria-hidden>
-      <path
-        d="M50 5 L95 60 Q50 52 5 60 Z"
-        fill="#ffffffff"
-        stroke="rgba(0,0,0,.1)"
-        strokeWidth="2"
-      />
-    </svg>
-  );
-
-  return (
-    <div
-      onClick={enabled ? onClick : undefined}
-      title={
-        kind === "back"
-          ? enabled
-            ? "Go back"
-            : "No back link"
-          : enabled
-          ? "Go forward"
-          : "No forward link"
-      }
-      style={wrapper}
-    >
-      <ChevSVG s={chevStyle(0)} />
-    </div>
-  );
-}*/

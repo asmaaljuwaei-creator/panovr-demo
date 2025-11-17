@@ -1,0 +1,63 @@
+{
+  "type": "FeatureCollection",
+  "name": "3D Points Example",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "جبل النور",
+        "ename": "Jabal al-Nour",
+        "type": "mountain",
+        "elevation": 642
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [39.8585, 21.4574, 642]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "جبل ثور",
+        "ename": "Jabal Thawr",
+        "type": "mountain",
+        "elevation": 759
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [39.8492, 21.3765, 759]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "برج الساعة",
+        "ename": "Makkah Clock Tower",
+        "type": "building",
+        "height": 601
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [39.8262, 21.4187, 601]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "مسار جبلي",
+        "ename": "Mountain Trail",
+        "type": "path"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [39.8585, 21.4574, 642],
+          [39.8590, 21.4580, 650],
+          [39.8595, 21.4585, 655],
+          [39.8600, 21.4590, 660],
+          [39.8605, 21.4595, 665]
+        ]
+      }
+    }
+  ]
+}
